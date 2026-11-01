@@ -1,0 +1,21 @@
+# Entorno virtual
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Cachés y artefactos
+.pytest_cache/
+.mypy_cache/
+.pyre/
+*.log
+
+# Editor
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
