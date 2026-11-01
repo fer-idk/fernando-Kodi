@@ -1,5 +1,6 @@
 import random
 from dataclasses import dataclass
+from pathlib import Path
 
 import pygame
 
@@ -11,8 +12,9 @@ FPS = 60
 ROAD_TOP = 90
 ROAD_BOTTOM = HEIGHT - 90
 GOAL_Y = 30
-PLAYER_SIZE = 34
+PLAYER_SIZE = (36, 36)
 PLAYER_START = (60, HEIGHT - 120)
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
@@ -36,79 +38,96 @@ class Level:
     max_speed: float
 
 
+def load_image(path: Path, size):
+    if path.exists():
+        image = pygame.image.load(path).convert_alpha()
+        return pygame.transform.smoothscale(image, size)
+
+    surface = pygame.Surface(size, pygame.SRCALPHA)
+    pygame.draw.ellipse(surface, YELLOW, (8, 8, size[0] - 16, size[1] - 12))
+    pygame.draw.circle(surface, BLACK, (size[0] // 3, size[1] // 2 - 2), 4)
+    pygame.draw.circle(surface, BLACK, (size[0] * 2 // 3, size[1] // 2 - 2), 4)
+    pygame.draw.line(surface, BLACK, (size[0] // 2, size[1] // 2 - 6), (size[0] - 8, size[1] // 3), 2)
+    return surface
+
+
+def load_sound(path: Path):
+    if not path.exists():
+        return None
+    try:
+        return pygame.mixer.Sound(str(path))
+    except pygame.error:
+        return None
+
+
 class Player:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.width = PLAYER_SIZE
-        self.height = PLAYER_SIZE
+    def __init__(self, x, y, image):
+        self.image = image
+        self.rect = self.image.get_rect(topleft=(x, y))
         self.speed = 5
-        self.rect = pygame.Rect(self.x, self.y, self.width, self.height)
+        self.jump_cooldown = 0
+        self.invulnerable = 0
 
     def move(self, dx, dy):
-        self.x += dx
-        self.y += dy
-        self.rect.x = self.x
-        self.rect.y = self.y
+        self.rect.x += dx
+        self.rect.y += dy
 
     def reset(self, x, y):
-        self.x = x
-        self.y = y
         self.rect.x = x
         self.rect.y = y
 
+    def jump(self):
+        if self.jump_cooldown <= 0:
+            self.rect.y -= 26
+            self.jump_cooldown = 18
+
+    def update(self):
+        if self.jump_cooldown > 0:
+            self.jump_cooldown -= 1
+        if self.invulnerable > 0:
+            self.invulnerable -= 1
+
     def draw(self, screen):
-        pygame.draw.ellipse(screen, YELLOW, self.rect)
-        pygame.draw.rect(screen, BLACK, (self.x + 8, self.y + 10, 18, 8), 0)
-        pygame.draw.circle(screen, BLACK, (self.x + 10, self.y + 10), 3)
-        pygame.draw.circle(screen, BLACK, (self.x + 24, self.y + 10), 3)
-        pygame.draw.line(screen, BLACK, (self.x + 18, self.y + 7), (self.x + 30, self.y + 2), 2)
+        if self.invulnerable > 0 and (pygame.time.get_ticks() // 90) % 2 == 0:
+            return
+        screen.blit(self.image, self.rect)
 
 
 class Car:
-    def __init__(self, x, y, width, height, speed):
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
+    def __init__(self, x, y, image, speed):
+        self.image = image
         self.speed = speed
-        self.rect = pygame.Rect(x, y, width, height)
+        self.rect = self.image.get_rect(topleft=(x, y))
 
     def update(self):
-        self.x += self.speed
-        self.rect.x = self.x
+        self.rect.x += self.speed
 
     def draw(self, screen):
-        pygame.draw.rect(screen, RED, self.rect)
-        pygame.draw.rect(screen, BLACK, self.rect, 2)
-        pygame.draw.rect(screen, BLUE, (self.x + 10, self.y + 5, self.width - 20, self.height - 10))
+        screen.blit(self.image, self.rect)
 
-    def recycle(self, direction):
-        if direction > 0 and self.x > WIDTH + 200:
-            self.x = -self.width - random.randint(40, 180)
-            self.rect.x = self.x
-        elif direction < 0 and self.x < -self.width - 200:
-            self.x = WIDTH + random.randint(40, 180)
-            self.rect.x = self.x
+    def recycle(self):
+        if self.speed > 0 and self.rect.x > WIDTH + 120:
+            self.rect.x = -self.rect.width - random.randint(40, 180)
+        elif self.speed < 0 and self.rect.x < -self.rect.width - 120:
+            self.rect.x = WIDTH + random.randint(40, 180)
 
 
 def build_levels():
     return [
         Level("Nivel 1: Primer intento", [150, 220, 290], 5, 2.2, 4.0),
         Level("Nivel 2: Calle más exigente", [130, 200, 270, 340], 7, 3.3, 5.5),
+        Level("Nivel 3: Cruce extremo", [120, 180, 240, 300, 360], 9, 4.2, 6.8),
     ]
 
 
-def create_cars_for_level(level):
+def create_cars_for_level(level, enemy_image):
     cars = []
-    used_positions = {lane: [] for lane in level.lane_y}
-
     for index in range(level.car_count):
         lane_index = index % len(level.lane_y)
-        lane_y = level.lane_y[lane_index]
+        y = level.lane_y[lane_index]
         direction = 1 if lane_index % 2 == 0 else -1
-        width = 80 if index % 2 == 0 else 68
-        height = 28
+        size = (88, 32)
+        image = pygame.transform.smoothscale(enemy_image, size)
         speed = random.uniform(level.min_speed, level.max_speed) * direction
 
         if direction > 0:
@@ -116,38 +135,49 @@ def create_cars_for_level(level):
         else:
             x = WIDTH + random.randint(80, 240) + index * 26
 
-        car = Car(x, lane_y, width, height, speed)
-        cars.append(car)
-        used_positions[lane_y].append(car)
-
+        cars.append(Car(x, y, image, speed))
     return cars
 
 
 class Game:
     def __init__(self):
         pygame.init()
+        try:
+            pygame.mixer.init()
+        except pygame.error:
+            pygame.mixer = None
+
         pygame.display.set_caption("La gallina cruzando la calle")
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
+
+        self.player_image = load_image(ASSETS_DIR / "jugador.png", PLAYER_SIZE)
+        self.enemy_image = load_image(ASSETS_DIR / "enemigo.png", (88, 32))
+        self.jump_sound = load_sound(ASSETS_DIR / "salto.wav")
+        self.collision_sound = load_sound(ASSETS_DIR / "colision.wav")
+
         self.levels = build_levels()
         self.current_level_index = 0
-        self.player = Player(*PLAYER_START)
+        self.player = Player(60, HEIGHT - 120, self.player_image)
         self.cars = []
         self.running = True
-        self.game_state = "playing"
+        self.state = "menu"
+        self.lives = 3
+        self.score = 0
         self.load_level(self.current_level_index)
 
     def load_level(self, level_index):
-        level = self.levels[level_index]
         self.current_level_index = level_index
-        self.cars = create_cars_for_level(level)
-        self.player.reset(*PLAYER_START)
+        level = self.levels[level_index]
+        self.cars = create_cars_for_level(level, self.enemy_image)
+        self.player.reset(60, HEIGHT - 120)
+        self.player.invulnerable = 0
 
     def handle_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
-                self.game_state = "quit"
+                self.state = "quit"
 
     def handle_player_movement(self):
         keys = pygame.key.get_pressed()
@@ -163,54 +193,67 @@ class Game:
         if keys[pygame.K_DOWN] or keys[pygame.K_s]:
             dy += self.player.speed
 
+        if keys[pygame.K_SPACE]:
+            self.player.jump()
+            if self.jump_sound is not None:
+                self.jump_sound.play()
+
         self.player.move(dx, dy)
-        self.player.x = max(0, min(self.player.x, WIDTH - self.player.width))
-        self.player.y = max(ROAD_TOP, min(self.player.y, HEIGHT - self.player.height - ROAD_TOP))
+        self.player.rect.x = max(0, min(self.player.rect.x, WIDTH - self.player.rect.width))
+        self.player.rect.y = max(0, min(self.player.rect.y, HEIGHT - self.player.rect.height))
+
+        self.player.update()
 
     def update_cars(self):
         for car in self.cars:
             car.update()
-            car.recycle(car.speed)
+            car.recycle()
 
     def check_collisions(self):
         for car in self.cars:
             if self.player.rect.colliderect(car.rect):
-                self.player.reset(*PLAYER_START)
+                if self.player.invulnerable > 0:
+                    continue
+                self.player.invulnerable = 90
+                self.lives -= 1
+                self.score = max(0, self.score - 25)
+                if self.collision_sound is not None:
+                    self.collision_sound.play()
+                self.player.reset(60, HEIGHT - 120)
+
+                if self.lives <= 0:
+                    self.state = "game_over"
+                    self.running = False
                 break
 
     def check_win_condition(self):
-        if self.player.y < GOAL_Y + 20:
+        if self.player.rect.y < GOAL_Y + 20:
+            self.score += 100 * (self.current_level_index + 1)
             if self.current_level_index < len(self.levels) - 1:
                 self.current_level_index += 1
                 self.load_level(self.current_level_index)
             else:
-                self.game_state = "won"
+                self.state = "won"
                 self.running = False
 
     def draw_background(self):
         self.screen.fill(BLACK)
-
-        # Suelo
         pygame.draw.rect(self.screen, GRASS, (0, 0, WIDTH, ROAD_TOP))
         pygame.draw.rect(self.screen, GRASS, (0, ROAD_BOTTOM, WIDTH, ROAD_TOP))
         pygame.draw.rect(self.screen, ROAD, (0, ROAD_TOP, WIDTH, ROAD_BOTTOM - ROAD_TOP))
-
-        # Línea de meta
         pygame.draw.rect(self.screen, GOAL, (0, GOAL_Y, WIDTH, 18))
 
-        # Líneas separadoras del carril
         for y in range(ROAD_TOP, ROAD_BOTTOM, 60):
             pygame.draw.rect(self.screen, LINE, (0, y + 28, WIDTH, 4))
 
-        # Bordes de carretera
         pygame.draw.rect(self.screen, WHITE, (0, ROAD_TOP, WIDTH, 3))
         pygame.draw.rect(self.screen, WHITE, (0, ROAD_BOTTOM - 3, WIDTH, 3))
 
     def draw_ui(self):
         level_name = self.levels[self.current_level_index].name
         font = pygame.font.SysFont("arial", 24)
-        label = font.render(level_name, True, WHITE)
-        self.screen.blit(label, (20, 18))
+        text = font.render(f"{level_name} | Vidas: {self.lives} | Puntuación: {self.score}", True, WHITE)
+        self.screen.blit(text, (20, 18))
 
     def draw(self):
         self.draw_background()
@@ -220,12 +263,55 @@ class Game:
         self.draw_ui()
         pygame.display.flip()
 
+    def show_start_screen(self):
+        self.screen.fill(BLACK)
+        title_font = pygame.font.SysFont("arial", 52)
+        text_font = pygame.font.SysFont("arial", 28)
+
+        title = title_font.render("La gallina cruzando", True, LIMON)
+        subtitle = text_font.render("Pulsa ENTER para comenzar", True, WHITE)
+        controls = text_font.render("Mover: flechas o WASD | Saltar: ESPACIO", True, WHITE)
+
+        self.screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 120))
+        self.screen.blit(subtitle, (WIDTH // 2 - subtitle.get_width() // 2, 220))
+        self.screen.blit(controls, (WIDTH // 2 - controls.get_width() // 2, 270))
+        pygame.display.flip()
+
+        while self.state == "menu":
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                    self.state = "quit"
+                    return
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
+                    self.state = "playing"
+                    return
+            pygame.time.delay(20)
+
+    def show_end_screen(self):
+        self.screen.fill(BLACK)
+        large = pygame.font.SysFont("arial", 48)
+        small = pygame.font.SysFont("arial", 28)
+
+        if self.state == "won":
+            text = large.render("¡Has ganado!", True, LIMON)
+            detail = small.render(f"Puntuación final: {self.score}", True, WHITE)
+        else:
+            text = large.render("Juego terminado", True, RED)
+            detail = small.render(f"Puntuación final: {self.score}", True, WHITE)
+
+        self.screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2 - 50))
+        self.screen.blit(detail, (WIDTH // 2 - detail.get_width() // 2, HEIGHT // 2 + 20))
+        pygame.display.flip()
+        pygame.time.delay(2100)
+
     def run(self):
+        self.show_start_screen()
         while self.running:
             self.clock.tick(FPS)
             self.handle_events()
 
-            if self.game_state == "playing":
+            if self.state == "playing":
                 self.handle_player_movement()
                 self.update_cars()
                 self.check_collisions()
@@ -234,23 +320,6 @@ class Game:
 
         self.show_end_screen()
         pygame.quit()
-
-    def show_end_screen(self):
-        self.screen.fill(BLACK)
-        font_large = pygame.font.SysFont("arial", 44)
-        font_small = pygame.font.SysFont("arial", 26)
-
-        if self.game_state == "won":
-            text = font_large.render("¡Ganaste!", True, LIMON)
-            subtitle = font_small.render("La gallina cruzó la calle con éxito.", True, WHITE)
-        else:
-            text = font_large.render("Juego cerrado", True, WHITE)
-            subtitle = font_small.render("Gracias por jugar.", True, WHITE)
-
-        self.screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2 - 40))
-        self.screen.blit(subtitle, (WIDTH // 2 - subtitle.get_width() // 2, HEIGHT // 2 + 20))
-        pygame.display.flip()
-        pygame.time.delay(2000)
 
 
 def main():
