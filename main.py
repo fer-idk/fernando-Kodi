@@ -164,6 +164,7 @@ class Game:
         self.state = "menu"
         self.lives = 3
         self.score = 0
+        self.level_clear_timer = 0.0
         self.load_level(self.current_level_index)
 
     def load_level(self, level_index):
@@ -230,8 +231,8 @@ class Game:
         if self.player.rect.y < GOAL_Y + 20:
             self.score += 100 * (self.current_level_index + 1)
             if self.current_level_index < len(self.levels) - 1:
-                self.current_level_index += 1
-                self.load_level(self.current_level_index)
+                self.state = "level_cleared"
+                self.level_clear_timer = 1.2
             else:
                 self.state = "won"
                 self.running = False
@@ -261,6 +262,26 @@ class Game:
             car.draw(self.screen)
         self.player.draw(self.screen)
         self.draw_ui()
+        pygame.display.flip()
+
+    def draw_level_clear(self):
+        self.draw_background()
+        for car in self.cars:
+            car.draw(self.screen)
+        self.player.draw(self.screen)
+        self.draw_ui()
+
+        alpha = min(255, int((1.0 - self.level_clear_timer / 1.2) * 255))
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 160))
+        self.screen.blit(overlay, (0, 0))
+
+        font_large = pygame.font.SysFont("arial", 54)
+        font_small = pygame.font.SysFont("arial", 26)
+        title = font_large.render("¡Nivel superado!", True, (255, 255, 255, alpha))
+        details = font_small.render(f"Siguiente nivel: {self.levels[self.current_level_index + 1].name}", True, (255, 255, 255, alpha))
+        self.screen.blit(title, (WIDTH // 2 - title.get_width() // 2, HEIGHT // 2 - 40))
+        self.screen.blit(details, (WIDTH // 2 - details.get_width() // 2, HEIGHT // 2 + 30))
         pygame.display.flip()
 
     def show_start_screen(self):
@@ -317,6 +338,13 @@ class Game:
                 self.check_collisions()
                 self.check_win_condition()
                 self.draw()
+            elif self.state == "level_cleared":
+                self.level_clear_timer -= self.clock.get_time() / 1000.0
+                self.draw_level_clear()
+                if self.level_clear_timer <= 0:
+                    self.current_level_index += 1
+                    self.load_level(self.current_level_index)
+                    self.state = "playing"
 
         self.show_end_screen()
         pygame.quit()
